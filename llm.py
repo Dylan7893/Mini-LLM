@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 # Select the best available hardware backend for PyTorch execution.
 # CUDA is used for NVIDIA GPUs, MPS is used for Apple Silicon GPUs,
@@ -120,3 +122,51 @@ assert torch.equal(xb[:, 1:], yb[:, :-1])
 
 print(repr(decode(xb[0, :40].tolist())))
 print(repr(decode(yb[0, :40].tolist())))
+
+
+class BigramLanguageModel(nn.Module):
+    def __init__(self, vocab_size):
+        super().__init__()
+        self.next_token_table = nn.Embedding(vocab_size, vocab_size)
+
+    def forward(self, indices, targets=None):
+        logits = self.next_token_table(indices)
+        loss = None
+
+        if targets is not None:
+            batch, time_steps, channels = logits.shape
+            loss = F.cross_entropy(
+                logits.reshape(batch * time_steps, channels),
+                targets.reshape(batch * time_steps),
+            )
+        return logits, loss
+
+@torch.no_grad()
+def generate_bigram(model, indices, max_new_tokens, temperature=1.0):
+    model.eval()
+    for _ in range(max_new_tokens):
+        logits, _ = model(indices)
+        logits = logits[:, -1, :] / max(temperature, 1e-5)
+        probabilities = F.softmax(logits, dim=-1)
+        next_index = torch.multinomial(probabilities, num_samples=1)
+        indices = torch.cat((indices, next_index), dim=1)
+    return indices
+
+model = BigramLanguageModel(vocab_size).to(device)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+for step in range(500):
+    inputs, targets = get_batch("train")
+    _, loss = model(inputs, targets)
+
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+    if step % 100 == 0:
+        print(step, loss.item())
+
+prompt = "ROMEO:\n" if all(c in stoi for c in "ROMEO:\n") else train_text[:10]
+start = torch.tensor([encode(prompt)], dtype=torch.long, device=device)
+result = generate_bigram(model, start, max_new_tokens=400)
+print(decode(result[0].tolist()))
