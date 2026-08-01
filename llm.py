@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pathlib import Path
+from urllib.request import urlretrieve
 
 # Select the best available hardware backend for PyTorch execution.
 # CUDA is used for NVIDIA GPUs, MPS is used for Apple Silicon GPUs,
@@ -12,11 +14,9 @@ elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
 else:
     device = "cpu"
 
-print(device)
+#Display the device the model will be executed on
+#print(device)
 
-
-from pathlib import Path
-from urllib.request import urlretrieve
 
 # Tiny Shakespeare provides a small text dataset for language model experiments.
 # The dataset contains Shakespeare's writing and works well for initial testing.
@@ -39,10 +39,10 @@ if not data_path.exists():
 text = data_path.read_text(encoding="utf-8")
 
 # Display a preview of the dataset to verify successful loading.
-print(text[:500])
+#print(text[:500])
 
 # Display the total number of characters available for training.
-print(f"Characters: {len(text):,}")
+#print(f"Characters: {len(text):,}")
 
 
 # Split the dataset into training and validation sections.
@@ -53,9 +53,9 @@ split_index = int(0.90 * len(text))
 train_text = text[:split_index]
 val_text = text[split_index:]
 
-
-print(f"Training characters:   {len(train_text):,}")
-print(f"Validation characters: {len(val_text):,}")
+# Count of training/validation characters
+#print(f"Training characters:   {len(train_text):,}")
+#print(f"Validation characters: {len(val_text):,}")
 
 
 # Verify dataset integrity before continuing.
@@ -170,3 +170,32 @@ prompt = "ROMEO:\n" if all(c in stoi for c in "ROMEO:\n") else train_text[:10]
 start = torch.tensor([encode(prompt)], dtype=torch.long, device=device)
 result = generate_bigram(model, start, max_new_tokens=400)
 print(decode(result[0].tolist()))
+
+n_embd = 64
+token_embedding = nn.Embedding(vocab_size, n_embd)
+
+position_embedding = nn.Embedding(BLOCK_SIZE, n_embd)
+
+batch, time_steps = xb.shape
+token_vectors = token_embedding(xb)
+position_vectors = position_embedding(
+    torch.arange(time_steps, device=device)
+)
+x = token_vectors + position_vectors
+
+weights = torch.tril(torch.ones(time_steps, time_steps, device=device))
+weights = weights / weights.sum(dim=1, keepdim=True)
+context_vectors = weights @ x
+
+network = nn.Sequential(
+    nn.Linear(n_embd, 4 * n_embd),
+    nn.GELU(),
+    nn.Linear(4 * n_embd, vocab_size),
+)
+
+logits = network(context_vectors)
+
+print("\ntoken IDs:      ", xb.shape)
+print("token vectors:  ", token_vectors.shape)
+print("context vectors:", context_vectors.shape)
+print("logits:         ", logits.shape)
